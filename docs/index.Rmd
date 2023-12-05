@@ -1,0 +1,232 @@
+---
+output:
+  html_document: default
+  word_document: default
+---
+```{r setup, include=FALSE}
+#data cleaning and exploring
+
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE
+)
+
+#load in data 
+library(tidyverse)
+source("https://edin.ac/3TBOKsl")
+get_my_data("B226455")
+
+#0: data cleaning
+#change months to years
+monkeydata$age[monkeydata$age == "108 months"] <- 9
+monkeydata$age[monkeydata$age == "240 months"] <- 20 
+#change to NA
+monkeydata <-
+  monkeydata %>%
+  mutate(
+    species = ifelse(species == "baboon", NA, species)
+  )
+taskdata <- 
+  taskdata %>%
+  mutate(
+    share = ifelse(share<0, NA, share)
+  )
+#fix typos
+taskdata <-
+  taskdata %>%
+  mutate(
+    task_time = gsub("minutes", "", task_time)
+  )
+taskdata$task_time <- as.integer(taskdata$task_time)
+monkeydata <-
+  monkeydata %>%
+  mutate(
+    rearing = gsub("catpv", "captv", rearing)
+  )
+#combine data frames
+alldata <- full_join(x=monkeydata, y=taskdata)
+#remove NA
+alldata <- na.omit(alldata)
+#change data types
+alldata$age <- as.integer(alldata$age)
+alldata$rearing <- factor(alldata$rearing)
+alldata$share <- factor(alldata$share)
+alldata$share <- alldata$share %>%
+  factor(
+         levels = c(0,1),
+         labels = c("no share", "share"))
+alldata$species <- factor(alldata$species)
+
+#1: the monkeys - describe the sample
+#run descriptives
+mean(alldata$age)
+sd(alldata$age)
+table(alldata$species) / sum(table(alldata$species)) * 100
+table(alldata$rearing) / sum(table(alldata$rearing)) * 100
+mean(alldata$dominance)
+sd(alldata$dominance)
+
+#1a: is distribution of primates with wild/captive rearing evenly distributed across species
+#check assumptions
+chisq.test(table(alldata$rearing, alldata$species))$expected
+#run test
+chisq.test(table(alldata$rearing, alldata$species))
+#1b: do dominance levels differ between wild/captive rearing
+#check assumptions
+shapiro.test(alldata$dominance[alldata$rearing=="captv"])
+shapiro.test(alldata$dominance[alldata$rearing=="wild"])
+var.test(dominance ~ rearing, data=alldata)
+#run test
+wilcox.test(alldata$dominance~alldata$rearing)
+#1c: do sharing behaviours differ across species
+#check assumptions
+chisq.test(table(alldata$share, alldata$species))$expected
+#run test
+chisq.test(table(alldata$share, alldata$species))
+chisq.test(table(alldata$share, alldata$species))$observed
+
+#2: monkey see monkey do - what factors influence the time it takes to solve the task
+#2a: fit baseline model with known predictors of problem solving ability
+#run base model and check assumptions
+basemod.t <- lm(task_time ~ species + rearing + age + rearing:species + rearing:age, data=alldata[-76, ])
+plot(basemod.t)
+summary(basemod.t)
+#visualise and tabulate base model
+library(sjPlot)
+plot_model(basemod.t)
+tab_model(basemod.t)
+#2b: add to the baseline model to address research interest
+#run model and check assumptions
+mod.t <- lm(task_time ~ species + rearing + age + dominance + rearing:species + rearing:age + dominance:species, data=alldata[-76, ])
+plot(mod.t)
+summary(mod.t)
+#went back and removed observation 76 after sensitivity analysis
+#visualise and tabulate model
+plot_model(mod.t, type="eff")
+tab_model(mod.t)
+#does model explain more variance than baseline
+anova(basemod.t, mod.t)
+
+#3: monkey business - what factors make primates more or less likely to share food
+#3a: explore main predictors for sharing behaviour
+#run base model and check assumptions
+basemod.s <- glm(share ~ species + rearing + age + rearing:species + rearing:age, 
+                 family=binomial,
+                 data=alldata)
+plot(rstudent(basemod.s, type = 'deviance'), 
+     ylab = 'Studentized Deviance Residuals')
+summary(basemod.s)
+exp(coef(basemod.s))
+#visualise
+plot_model(basemod.s, type = "eff")
+#run model and check assumptions
+mod.s <- glm(formula = share ~ species + rearing + age + dominance + rearing:species + rearing:age + dominance:species, family=binomial, data=alldata)
+plot(rstudent(mod.s, type = 'deviance'), 
+     ylab = 'Studentized Deviance Residuals')
+summary(mod.s)
+exp(coef(mod.s))
+#visualise
+plot_model(mod.s, type = "eff")
+#does model explain more variance than base
+anova(basemod.s, mod.s, test='Chisq')
+#3b: does the finding from 1C still hold after accounting for these factors
+summary(mod.s)
+#3c: the researchers have a 15 year old Bonobo raised in the wild who is 1SD above average in neuroticism, what is the probability of him sharing his grapes
+newdata = data.frame(age=15, rearing="wild", species="bonobo", dominance=mean(alldata$dominance))
+predict.glm(mod.s, newdata, type="response")
+```
+
+# USMR Report
+
+# 1. The Monkeys
+
+The present study assessed a sample of `r nrow(alldata)` monkeys who had a mean age of `r mean(alldata$age) %>% round(2)` (SD = `r sd(alldata$age) %>% round(2)`). Of the monkeys surveyed, 33.33% were the species Bonobo, 34.01% were Capuchin, and 32.65% were Macaque, with 54.42% having been reared in captivity and 45.58% in the wild. The monkeys were assessed on personality, and were found to have a mean dominance score of `r mean(alldata$dominance) %>% round(2)` (SD = `r sd(alldata$dominance) %>% round(2)`). Prior to analysis data was cleaned and all missing or incorrect values were either removed from the data set or corrected.
+
+The researchers were interested in finding out whether distribution of wild and captive rearings were evenly distributed across species, so a chi-square test of independence was run on species and rearing. Assumptions were met, as there were 2 or more levels in each variable, observations were independent, and expected frequencies were all above 1 and were above 5 in 80% of cases. The chi-square test found that distribution of wild and captive rearings were not significantly different across species ($p$=`r chisq.test(table(alldata$rearing, alldata$species))$p.value %>% round(3)`). This suggested that the distribution of monkeys being reared in captivity or in the wild was approximately evenly distributed across species.
+
+Researchers were also interested in whether or not dominance levels differed between monkeys raised in the wild compared to those raised in captivity. An independent t-test was planned to assess this. A Shapiro test found assumptions of normality were met for dominance levels in the group reared in captivity,  however the Shapiro  run on dominance levels in the group reared in the wild found this data violated the assumption of normality. Due to this assumption being violated, a non-parametric Mann-Whitney U test was run in place of an independent t-test. Captive monkeys had a mean dominance score of -0.08 and wild monkeys had one of 0.24, however the Mann-Whitney U test found that the difference between dominance levels was not significantly different ($p$=`r wilcox.test(alldata$dominance~alldata$rearing)$p.value %>% round(3)`).
+
+In order to assess whether different species differed in sharing behaviour, a chi-square test of independence was run. The assumptions were met, with 2+ levels in each variable, independence of observations, expected frequencies above 1, and 80% of expected frequencies above 5. The results of the chi-square showed a statistically significant difference in sharing behaviour across species ($x^2$(`r nrow(alldata)-1`)=`r chisq.test(table(alldata$share, alldata$species))$statistic %>% round(2)`; $p$=`r chisq.test(table(alldata$share, alldata$species))$p.value %>% round(3)`) suggesting that levels of sharing behaviour were not evenly spread across species. Observed counts, shown in Figure 1, reveal that sharing behaviour was higher in Capuchin monkeys than Bonobos or Macaques as found in  previous research. 
+
+```{r, echo=FALSE}
+library(knitr)
+chitable <- table(alldata$share, alldata$species)
+rownames(chitable) = c("Didn't Share", "Did Share")
+kable(chitable, col.names = c("Bonobo", "Capuchin", "Macaque"), caption = "Observed Frequencies of Sharing Behaviour by Species", "pipe")
+```
+**Figure 1: Table of Sharing Behaviour by Monkey Species**
+
+# 2. Monkey see, monkey do
+
+One of the main research questions of interest to the researchers was what predictors influenced the time it took the monkeys to complete the problem-solving task. In order to assess this, a multiple linear regression model was fitted to the data, with the outcome being time taken to complete the task. The predictors of interest to the researchers were dominance and species and the interaction between these, however some more factors backed up by previous research were also added. These were rearing, age, the interaction between rearing and age, and the interaction between rearing and species. After the regression model was fitted to the data, plots were observed to check assumptions. The red line on the residuals versus fitted plot was horizontal and close to zero, showing the assumption of linearity was met. The data points on the QQ plot were approximately fitted to the dotted line showing the assumption of normality was met. The red line on the scale-location plot was roughly horizontal. However, after observing the residuals vs leverage plot one data point was noted as being particularly influential on the model and was removed from the model following a sensitivity analysis which found it influenced the results. It is worth noting that when this data-point was included there was not an individual effect for dominance observed or an interaction effect between the macaque species and dominance, however on its removal from analysis these effects became significant. The individual effect of the macaque species remained significant.
+
+```{r, echo=FALSE}
+library(knitr)
+library(broom)
+mod.t %>%
+  tidy() %>%
+  mutate(
+    p.value = scales::pvalue(p.value),
+    term = c("Intercept", "Species Capuchin", "Species Macaque", "Rearing Wild", "Age", "Dominance", "Species Capuchin : Rearing Wild", "Species Macaque : Rearing Wild", "Rearing Wild : Age", "Species Capuchin : Dominance", "Species Macaque : Dominance")
+  ) %>%
+  kable(
+    caption = "Regression Coefficients For Model of Outcome Time Taken",
+    col.names = c("Predictor", "Coefficient", "SE", "t", "p"),
+    digits = c(0, 2, 3, 2, 3)
+  )
+```
+
+
+**Figure 2: Table of Regression Coefficients For Outcome of Time Taken to Complete Task**
+
+Interpretation of the intercept in Figure 2 shows that the task time would be 13.60 minutes for a Bonobo, aged zero, raised in the wild, with a dominance score of zero. The regression model found two significant individual effects of the Capuchin species and dominance and one interaction between the Macaque species and dominance. As seen in the table of coefficients above, Capuchin monkeys were found to complete the problem-solving task in `r mod.t$coefficients[2] %>% round(2)` minutes less than a Bonobo would ($t$=`r summary(mod.t)$coefficients[2,3] %>% round(2)`, $p$=`r summary(mod.t)$coefficients[2,4] %>% round(3)`) if all other variables were held constant. Also, a one unit increase in dominance with all other variables held constant was associated with a monkey finishing the problem-solving task in `r mod.t$coefficients[6] %>% round(2)` minutes less ($t$=`r summary(mod.t)$coefficients[6,3] %>% round(2)`, $p$=`r summary(mod.t)$coefficients[6,4] %>% round(3)`). Compared to Bonobos, a one unit increase in dominance in Macaques was associated with a `r mod.t$coefficients[11] %>% round(2)` greater decrease in task time ($t$=`r summary(mod.t)$coefficients[11,3] %>% round(2)`, $p$`r scales::pvalue(summary(mod.t)$coefficients[11,4])`). Predicted values for task time based on dominance are shown in Figure 3,  which illustrates the findings of high dominance levels predicting slower task times. The model suggests that Monkeys being Capuchin rather than Bonobo, as well as having higher dominance levels, were potential predictors of faster task performance. It also suggests that dominance was in particular a predictor for slower performance on the task for Macaques.
+
+```{r, echo=FALSE,results='hide',fig.keep='all'}
+library(effects)
+plot_model(mod.t, type = "eff")[4]
+```
+
+
+**Figure 3: Plot Showing Model of Dominance Level and Predicted Task Time**
+
+Compared to a null model, the model explained significantly more variance ($F$(`r summary(mod.t)$fstatistic[2]`,`r summary(mod.t)$fstatistic[3]`)=`r summary(mod.t)$fstatistic[1] %>% round(2)`, $p$<0.001), as well as when compared to a baseline model only including the variables backed up by previous research ($F$(`r anova(mod.t, basemod.t)$"Res.Df"`)=`r anova(mod.t, basemod.t)[5,2] %>% round(2)`, $p$<0.001). This suggests that the inclusion of dominance did explain a significant amount of additional variance beyond the previously observed factors.
+
+# 3. Monkey business
+The second research question of interest to the researchers was to explore the main predictors of whether or not the monkeys would share the food following the problem-solving task. Since this was a binary outcome, a logistic generalised linear regression model was fitted to the data.  The regression analysis was fitted with sharing behaviour as the outcome, and the predictors of interest to the researchers as well as those already established by previous research. The predictors of interest were dominance, species, and the interaction between these. The predictors backed by previous research were species, rearing, age, the interaction between rearing and species, and the interaction between rearing and age. After the regression model was fitted to the data, a plot of studentized deviant residuals was observed with no points being above two, indicating the assumption of normality was met.
+
+```{r, echo=FALSE}
+library(knitr)
+library(broom)
+mod.s %>%
+  tidy() %>%
+  mutate(
+    estimate = exp(estimate),
+    p.value = scales::pvalue(p.value),
+    term = c("Intercept", "Species Capuchin", "Species Macaque", "Rearing Wild", "Age", "Dominance", "Species Capuchin : Rearing Wild", "Species Macaque : Rearing Wild", "Rearing Wild : Age", "Species Capuchin : Dominance", "Species Macaque : Dominance")
+  ) %>%
+  kable(
+    caption = "Regression Coefficients For Model of Outcome Sharing Behaviour",
+    col.names = c("Predictor", "Exponential Coefficient", "SE", "z", "p"),
+    digits = c(0, 2, 3, 2, 3)
+  )
+```
+
+**Figure 4: Table of Regression Coefficients For Outcome of Sharing Behaviour**
+
+Due to the nature of logistic regression, Figure 4 shows the exponential coefficients which can be more easily interpreted in terms of odds. The intercept shows that the odds of a monkey sharing would be 1.29 if they were an age zero  Bonobo, reared in captivity, with a dominance score of zero. The regression model had no significant individual effects, but one significant interaction effect. This was an interaction between the Macaque species and dominance. Compared to Bonobos, a one unit increase of dominance in Macaques would be associated with increased odds of sharing by `r exp(summary(mod.s)$coefficients[11]) %>% round(2)` ($z$=`r summary(mod.s)$coefficients[11,3] %>% round(2)`, $p$=`r summary(mod.s)$coefficients[11,4] %>% round(3)`). This suggests that for Macaques higher dominance levels are associated with higher odds of sharing behaviour, whereas higher dominance in Bonobos is associated with lower odds of sharing. This effect is illustrated in Figure 5. It is worth noting that neither species nor dominance had a significant individual effect on the outcome of sharing. 
+
+```{r, echo=FALSE}
+library(interactions)
+interact_plot(mod.s, pred = "dominance", modx = "species", interval = TRUE)
+```
+
+**Figure 5: Plot Showing Interaction Effect Between Species and Dominance Levels on Outcome of Sharing**
+
+A baseline model was also fitted to the data, including only the factors which were backed up by past research. Despite finding a significant interaction effect the model fitted to the outcome of sharing behaviour did not explain a significant additional amount of variance over the baseline model ($p$=`r anova(basemod.s, mod.s, test='Chisq')$"Pr(>Chi)"[2] %>% round(3)`). 
+
+The chi-square test run earlier found a significant difference between species and sharing behaviour, however in this model species did not have a significant individual effect on sharing behaviour. We can interpret that with the other factors accounted for in the regression model, the association between species and sharing no longer holds. It is possible that the association was impacted by the interaction between species and dominance that the regression model found. 
+
+The final question the researchers wished to answer involved using the model to predict the probability of a specific monkey engaging in sharing behaviour. The monkey in question was a 15 year old Bonobo raised in the wild who had a neuroticism level 1 standard deviation above average. Since the monkey's dominance score was unknown, it was input into the model as the mean dominance level. The model predicts a `r predict.glm(mod.s, newdata, type="response") %>% round(2)` likelihood that the monkey the researchers are interested will share the food following the problem-solving task.
+
+In conclusion, the researchers' variables of interest did increase the amount of variance explained in the outcome of time taken to complete the problem solving task, but there was not a significant increase in variance explained when the variables were added to the model predicting sharing behaviour. 
